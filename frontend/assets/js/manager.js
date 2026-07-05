@@ -34,12 +34,57 @@
   const grid = document.getElementById("ordersGrid");
   const empty = document.getElementById("ordersEmpty");
 
-  function renderOrders() {
-    const orders = Store.getOrders();
-    const openCount = orders.filter((o) => OPEN_STATUSES.includes(o.status)).length;
-    document.getElementById("openCountBadge").textContent = openCount || "";
+  function markPaid(b) {
+    let refs = [];
+    try {
+      const meta = JSON.parse(b.note);
+      if (meta && Array.isArray(meta.refs)) refs = meta.refs;
+    } catch (e) { /* no covered refs */ }
+    refs.forEach((r) => Store.setStatus(r, "Closed"));
+    Store.setStatus(b.ref, "Paid");
+    refresh();
+  }
 
-    empty.hidden = orders.length > 0;
+  function renderBills(bills) {
+    const mount = document.getElementById("billsAlerts");
+    mount.innerHTML = "";
+    bills
+      .slice()
+      .sort((a, b) => a.placedAt - b.placedAt)
+      .forEach((b) => {
+        const itemsHtml = b.items
+          .map((it) => `<li><span>${it.qty}× ${it.name}</span><span>R${fmt(it.qty * it.price)}</span></li>`)
+          .join("");
+        const card = document.createElement("div");
+        card.className = "bill-card";
+        card.innerHTML = `
+          <div class="bill-card-head">
+            <div><span class="bill-badge">🧾 Bill requested</span><span class="bill-table">Table ${b.table}</span></div>
+            <div class="bill-grand">R${fmt(b.total)}</div>
+          </div>
+          <ul class="order-items">${itemsHtml}</ul>
+          <div class="order-time">${timeAgo(b.placedAt)}</div>
+          <div class="bill-card-foot">
+            <button class="btn btn-gold btn-sm">Mark paid &amp; close table</button>
+          </div>`;
+        card.querySelector("button").onclick = () => markPaid(b);
+        mount.appendChild(card);
+      });
+  }
+
+  function renderOrders() {
+    const all = Store.getOrders();
+    const bills = all.filter((o) => o.status === "Bill requested");
+    const orders = all.filter(
+      (o) => o.status !== "Bill requested" && o.status !== "Paid" && !o.ref.startsWith("BILL-")
+    );
+
+    const openCount = orders.filter((o) => OPEN_STATUSES.includes(o.status)).length;
+    document.getElementById("openCountBadge").textContent = (openCount + bills.length) || "";
+
+    renderBills(bills);
+
+    empty.hidden = orders.length + bills.length > 0;
     grid.innerHTML = "";
 
     orders.forEach((o) => {

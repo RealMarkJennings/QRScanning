@@ -106,6 +106,31 @@ const Store = (function () {
     firstCloudLoad = false;
   }
 
+  // Insert a new row (a normal order or a bill request) into the cache and
+  // persist it. Optimistic: the cache updates immediately.
+  function insert(record) {
+    orders.unshift(record);
+    notifyLocal();
+    notifyOthers();
+    if (CLOUD) {
+      sbFetch("/orders", {
+        method: "POST",
+        headers: sbHeaders({ Prefer: "return=minimal" }),
+        body: JSON.stringify({
+          ref: record.ref,
+          table_number: record.table,
+          items: record.items,
+          total: record.total,
+          note: record.note,
+          status: record.status,
+          placed_at: record.placedAt
+        })
+      }).then(() => cloudRefresh());
+    } else {
+      saveOrdersLS();
+    }
+  }
+
   // ---------- public API ----------
   const api = {
     STATUS_FLOW,
@@ -125,26 +150,23 @@ const Store = (function () {
         status: "Received",
         placedAt: Date.now()
       };
-      orders.unshift(record); // optimistic
-      notifyLocal();
-      notifyOthers();
-      if (CLOUD) {
-        sbFetch("/orders", {
-          method: "POST",
-          headers: sbHeaders({ Prefer: "return=minimal" }),
-          body: JSON.stringify({
-            ref: record.ref,
-            table_number: record.table,
-            items: record.items,
-            total: record.total,
-            note: record.note,
-            status: record.status,
-            placed_at: record.placedAt
-          })
-        }).then(() => cloudRefresh());
-      } else {
-        saveOrdersLS();
-      }
+      insert(record);
+      return record;
+    },
+
+    // A bill request is stored as a special row: ref prefixed "BILL-",
+    // status "Bill requested", and note carrying the covered order refs.
+    addBill(bill) {
+      const record = {
+        ref: "BILL-" + Math.random().toString(36).slice(2, 6).toUpperCase(),
+        table: bill.table,
+        items: bill.items,
+        total: bill.total,
+        note: JSON.stringify({ kind: "bill", refs: bill.refs, device: bill.device }),
+        status: "Bill requested",
+        placedAt: Date.now()
+      };
+      insert(record);
       return record;
     },
 
