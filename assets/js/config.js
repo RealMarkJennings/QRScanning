@@ -11,6 +11,6 @@
  * commit here. Never paste your "service_role" (secret) key.
  */
 window.VASCO_CONFIG = {
-  supabaseUrl: "", // e.g. "https://abcdefgh.supabase.co"
-  supabaseKey: ""  // your Supabase "anon public" key
+  supabaseUrl: "https://tgidiwqvxszdzvezpjik.supabase.co",
+  supabaseKey: "sb_publishable_TObgim52JmzPfBQu6m9h6g_v04EMIaQ"
 };
