@@ -75,6 +75,27 @@ const Store = (function () {
     });
   }
 
+  // The orders table has no columns for guest name / device / covered refs,
+  // so we pack them into the existing "note" column as a small JSON envelope
+  // and unpack on read. Plain-text notes (older rows) still work.
+  function encodeMeta(record) {
+    if (record.refs) {
+      return JSON.stringify({ kind: "bill", refs: record.refs, g: record.guest || "", d: record.device || "" });
+    }
+    return JSON.stringify({ n: record.note || "", g: record.guest || "", d: record.device || "" });
+  }
+  function decodeMeta(raw) {
+    if (!raw) return { note: "", guest: "", device: "", refs: undefined };
+    try {
+      const m = JSON.parse(raw);
+      if (m && typeof m === "object") {
+        if (m.kind === "bill") return { note: "", guest: m.g || "", device: m.device || m.d || "", refs: m.refs };
+        if ("n" in m || "g" in m || "d" in m) return { note: m.n || "", guest: m.g || "", device: m.d || "", refs: undefined };
+      }
+    } catch (e) { /* legacy plain-text note */ }
+    return { note: raw, guest: "", device: "", refs: undefined };
+  }
+
   async function cloudRefresh() {
     const [oRes, uRes] = await Promise.all([
       sbFetch("/orders?select=*&order=placed_at.desc", { headers: sbHeaders() }),
@@ -84,15 +105,21 @@ const Store = (function () {
     const oRows = await oRes.json();
     const uRows = await uRes.json();
 
-    const nextOrders = oRows.map((r) => ({
-      ref: r.ref,
-      table: r.table_number,
-      items: r.items,
-      total: Number(r.total),
-      note: r.note || "",
-      status: r.status,
-      placedAt: Number(r.placed_at)
-    }));
+    const nextOrders = oRows.map((r) => {
+      const meta = decodeMeta(r.note);
+      return {
+        ref: r.ref,
+        table: r.table_number,
+        items: r.items,
+        total: Number(r.total),
+        note: meta.note,
+        guest: meta.guest,
+        device: meta.device,
+        refs: meta.refs,
+        status: r.status,
+        placedAt: Number(r.placed_at)
+      };
+    });
     const nextUnavail = uRows.map((r) => r.item_id);
 
     const changed =
@@ -121,7 +148,7 @@ const Store = (function () {
           table_number: record.table,
           items: record.items,
           total: record.total,
-          note: record.note,
+          note: encodeMeta(record),
           status: record.status,
           placed_at: record.placedAt
         })
@@ -147,6 +174,8 @@ const Store = (function () {
         items: order.items,
         total: order.total,
         note: order.note || "",
+        guest: order.guest || "",
+        device: order.device || "",
         status: "Received",
         placedAt: Date.now()
       };
@@ -155,14 +184,18 @@ const Store = (function () {
     },
 
     // A bill request is stored as a special row: ref prefixed "BILL-",
-    // status "Bill requested", and note carrying the covered order refs.
+    // status "Bill requested", carrying the covered order refs and the
+    // guest/device it belongs to (a bill is per phone/user, not per table).
     addBill(bill) {
       const record = {
         ref: "BILL-" + Math.random().toString(36).slice(2, 6).toUpperCase(),
         table: bill.table,
         items: bill.items,
         total: bill.total,
-        note: JSON.stringify({ kind: "bill", refs: bill.refs, device: bill.device }),
+        note: "",
+        guest: bill.guest || "",
+        device: bill.device || "",
+        refs: bill.refs,
         status: "Bill requested",
         placedAt: Date.now()
       };

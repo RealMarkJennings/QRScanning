@@ -48,6 +48,10 @@
     <div class="drawer-body" id="cartItems"></div>
     <div class="drawer-foot">
       <div class="field">
+        <label for="guestName">Your name (optional)</label>
+        <input id="guestName" type="text" maxlength="24" placeholder="e.g. Mark — so staff know whose order this is" />
+      </div>
+      <div class="field">
         <label for="orderNote">Notes for the kitchen (optional)</label>
         <textarea id="orderNote" rows="2" placeholder="e.g. medium rare, no chilli, extra napkins"></textarea>
       </div>
@@ -57,6 +61,16 @@
         Demo checkout — no real payment is taken.
       </p>
     </div>
+  </aside>
+
+  <!-- bill drawer -->
+  <aside class="drawer" id="billDrawer">
+    <div class="drawer-head">
+      <h2 id="billDrawerTitle">Your bill</h2>
+      <button class="drawer-close" id="closeBill">&times;</button>
+    </div>
+    <div class="drawer-body" id="billItems"></div>
+    <div class="drawer-foot" id="billFoot"></div>
   </aside>
 
   <div class="toast" id="toast"></div>
