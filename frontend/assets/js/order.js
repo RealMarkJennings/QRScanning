@@ -151,15 +151,84 @@
     });
     cart.clear();
     document.getElementById("orderNote").value = "";
+    recordMyOrder(rec);
     renderMenu();
     renderCart();
     closeDrawer();
-    toast(`Order ${rec.ref} sent to the kitchen! 🍤`);
+    renderTracking();
+    document.getElementById("trackBar").scrollIntoView({ behavior: "smooth", block: "start" });
+    toast(`Order ${rec.ref} placed! Track it above 🍤`);
   };
 
-  // Re-render menu if manager toggles availability in another tab.
-  Store.onChange(renderMenu);
+  // ---- Live order tracking (this device) ----
+  const MY_KEY = "vasco_my_orders_v1";
+  const STEPS = ["Received", "Preparing", "Ready", "Served"];
+  const FRIENDLY = {
+    Received: "Order received",
+    Preparing: "Being prepared",
+    Ready: "Ready!",
+    Served: "Served",
+    Closed: "Completed"
+  };
+  let myOrders = [];
+  try { myOrders = JSON.parse(localStorage.getItem(MY_KEY)) || []; } catch (e) { myOrders = []; }
+  const lastStatus = {};
+
+  function recordMyOrder(rec) {
+    myOrders.push({ ref: rec.ref, table: rec.table, placedAt: rec.placedAt });
+    localStorage.setItem(MY_KEY, JSON.stringify(myOrders));
+  }
+
+  const trackBar = document.getElementById("trackBar");
+
+  function renderTracking() {
+    const all = Store.getOrders();
+    const mine = myOrders
+      .map((m) => all.find((o) => o.ref === m.ref))
+      .filter((o) => o && String(o.table) === String(table) && o.status !== "Closed")
+      .sort((a, b) => b.placedAt - a.placedAt);
+
+    // Toast when a tracked order's status changes (e.g. becomes Ready).
+    mine.forEach((o) => {
+      if (lastStatus[o.ref] && lastStatus[o.ref] !== o.status) {
+        toast(`${FRIENDLY[o.status] || o.status} — order ${o.ref}`);
+      }
+      lastStatus[o.ref] = o.status;
+    });
+
+    if (mine.length === 0) {
+      trackBar.classList.remove("show");
+      trackBar.innerHTML = "";
+      return;
+    }
+    trackBar.classList.add("show");
+    trackBar.innerHTML = mine.map(trackCardHtml).join("");
+  }
+
+  function trackCardHtml(o) {
+    const idx = STEPS.indexOf(o.status);
+    const stepsHtml = STEPS.map((label, i) => {
+      const cls = i < idx ? "done" : i === idx ? "current" : "";
+      const mark = i < idx ? "✓" : i + 1;
+      return `<div class="step ${cls}"><span class="bar"></span><span class="dot">${mark}</span><span class="label">${label}</span></div>`;
+    }).join("");
+    return `
+      <div class="track-card">
+        <div class="track-head">
+          <div>
+            <div class="track-title">Your order</div>
+            <div class="track-ref">${o.ref} · Table ${o.table} · ${o.items.reduce((n, it) => n + it.qty, 0)} item(s) · R${fmt(o.total)}</div>
+          </div>
+          <span class="status-chip s-${o.status}">${FRIENDLY[o.status] || o.status}</span>
+        </div>
+        <div class="steps">${stepsHtml}</div>
+      </div>`;
+  }
+
+  // Re-render menu + tracker when data changes (manager updates, cloud poll).
+  Store.onChange(() => { renderMenu(); renderTracking(); });
 
   renderMenu();
   renderCart();
+  renderTracking();
 })();
