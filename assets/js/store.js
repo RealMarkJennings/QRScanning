@@ -1,46 +1,123 @@
 /*
- * Vasco ordering prototype — shared client-side store.
+ * Vasco ordering prototype — shared store.
  *
- * There is NO backend. Orders and menu availability live in localStorage,
- * so the customer page and the manager dashboard share state as long as
- * they run in the same browser. A BroadcastChannel pushes live updates
- * between open tabs/windows (e.g. manager dashboard + customer order).
+ * Two modes, same public API:
+ *
+ *   • Single-device (default): orders + availability live in localStorage,
+ *     synced between tabs of the SAME browser via BroadcastChannel.
+ *
+ *   • Cloud sync: if assets/js/config.js provides a Supabase URL + anon key,
+ *     orders + availability live in Supabase instead, so ANY device can place
+ *     an order and the manager dashboard (on another device) sees it. A short
+ *     poll keeps every open page up to date.
+ *
+ * The UI reads from an in-memory cache (kept synchronous on purpose); writes
+ * update the cache immediately (optimistic) and persist in the background.
  */
 const Store = (function () {
   const ORDERS_KEY = "vasco_orders_v1";
   const AVAIL_KEY = "vasco_unavailable_v1";
-  const channel = "BroadcastChannel" in window ? new BroadcastChannel("vasco") : null;
-
-  // Received -> Preparing -> Ready -> Served -> Closed
   const STATUS_FLOW = ["Received", "Preparing", "Ready", "Served", "Closed"];
+  const POLL_MS = 3000;
 
-  function read(key) {
-    try {
-      return JSON.parse(localStorage.getItem(key)) || null;
-    } catch (e) {
-      return null;
-    }
+  const cfg = window.VASCO_CONFIG || {};
+  const CLOUD = Boolean(cfg.supabaseUrl && cfg.supabaseKey);
+  const REST = CLOUD ? cfg.supabaseUrl.replace(/\/+$/, "") + "/rest/v1" : null;
+
+  const channel = "BroadcastChannel" in window ? new BroadcastChannel("vasco") : null;
+  const listeners = [];
+
+  // In-memory cache — the UI always reads from here.
+  let orders = [];
+  let unavailable = [];
+  let firstCloudLoad = true;
+
+  function notifyLocal() {
+    listeners.forEach((cb) => {
+      try { cb(); } catch (e) { /* ignore listener errors */ }
+    });
   }
-
-  function notify() {
+  function notifyOthers() {
     if (channel) channel.postMessage({ type: "update", t: Date.now() });
   }
 
-  return {
+  function newRef() {
+    return "V" + Math.random().toString(36).slice(2, 6).toUpperCase();
+  }
+
+  // ---------- localStorage backend ----------
+  function readLS(key) {
+    try { return JSON.parse(localStorage.getItem(key)) || null; }
+    catch (e) { return null; }
+  }
+  function loadFromLS() {
+    orders = readLS(ORDERS_KEY) || [];
+    unavailable = readLS(AVAIL_KEY) || [];
+  }
+  function saveOrdersLS() { localStorage.setItem(ORDERS_KEY, JSON.stringify(orders)); }
+  function saveAvailLS() { localStorage.setItem(AVAIL_KEY, JSON.stringify(unavailable)); }
+
+  // ---------- Supabase backend ----------
+  function sbHeaders(extra) {
+    return Object.assign(
+      {
+        apikey: cfg.supabaseKey,
+        Authorization: "Bearer " + cfg.supabaseKey,
+        "Content-Type": "application/json"
+      },
+      extra || {}
+    );
+  }
+  function sbFetch(path, opts) {
+    return fetch(REST + path, opts).catch((e) => {
+      console.error("Vasco sync error:", e);
+      return null;
+    });
+  }
+
+  async function cloudRefresh() {
+    const [oRes, uRes] = await Promise.all([
+      sbFetch("/orders?select=*&order=placed_at.desc", { headers: sbHeaders() }),
+      sbFetch("/unavailable_items?select=item_id", { headers: sbHeaders() })
+    ]);
+    if (!oRes || !uRes || !oRes.ok || !uRes.ok) return;
+    const oRows = await oRes.json();
+    const uRows = await uRes.json();
+
+    const nextOrders = oRows.map((r) => ({
+      ref: r.ref,
+      table: r.table_number,
+      items: r.items,
+      total: Number(r.total),
+      note: r.note || "",
+      status: r.status,
+      placedAt: Number(r.placed_at)
+    }));
+    const nextUnavail = uRows.map((r) => r.item_id);
+
+    const changed =
+      JSON.stringify(nextOrders) !== JSON.stringify(orders) ||
+      JSON.stringify(nextUnavail) !== JSON.stringify(unavailable);
+
+    orders = nextOrders;
+    unavailable = nextUnavail;
+
+    if (changed || firstCloudLoad) notifyLocal();
+    firstCloudLoad = false;
+  }
+
+  // ---------- public API ----------
+  const api = {
     STATUS_FLOW,
+    isCloud: CLOUD,
 
     getOrders() {
-      return read(ORDERS_KEY) || [];
+      return orders.slice();
     },
 
     addOrder(order) {
-      const orders = this.getOrders();
-      const ref =
-        "V" +
-        Math.random().toString(36).slice(2, 5).toUpperCase() +
-        (orders.length + 1);
       const record = {
-        ref,
+        ref: newRef(),
         table: order.table,
         items: order.items,
         total: order.total,
@@ -48,58 +125,125 @@ const Store = (function () {
         status: "Received",
         placedAt: Date.now()
       };
-      orders.unshift(record);
-      localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
-      notify();
+      orders.unshift(record); // optimistic
+      notifyLocal();
+      notifyOthers();
+      if (CLOUD) {
+        sbFetch("/orders", {
+          method: "POST",
+          headers: sbHeaders({ Prefer: "return=minimal" }),
+          body: JSON.stringify({
+            ref: record.ref,
+            table_number: record.table,
+            items: record.items,
+            total: record.total,
+            note: record.note,
+            status: record.status,
+            placed_at: record.placedAt
+          })
+        }).then(() => cloudRefresh());
+      } else {
+        saveOrdersLS();
+      }
       return record;
     },
 
     setStatus(ref, status) {
-      const orders = this.getOrders();
       const o = orders.find((x) => x.ref === ref);
-      if (o) o.status = status;
-      localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
-      notify();
+      if (!o) return;
+      o.status = status;
+      notifyLocal();
+      notifyOthers();
+      if (CLOUD) {
+        sbFetch("/orders?ref=eq." + encodeURIComponent(ref), {
+          method: "PATCH",
+          headers: sbHeaders({ Prefer: "return=minimal" }),
+          body: JSON.stringify({ status })
+        }).then(() => cloudRefresh());
+      } else {
+        saveOrdersLS();
+      }
     },
 
     advanceStatus(ref) {
-      const orders = this.getOrders();
       const o = orders.find((x) => x.ref === ref);
-      if (o) {
-        const i = STATUS_FLOW.indexOf(o.status);
-        if (i < STATUS_FLOW.length - 1) o.status = STATUS_FLOW[i + 1];
-      }
-      localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
-      notify();
+      if (!o) return;
+      const i = STATUS_FLOW.indexOf(o.status);
+      if (i < STATUS_FLOW.length - 1) o.status = STATUS_FLOW[i + 1];
+      this.setStatus(ref, o.status);
     },
 
     clearOrders() {
-      localStorage.removeItem(ORDERS_KEY);
-      notify();
+      orders = [];
+      notifyLocal();
+      notifyOthers();
+      if (CLOUD) {
+        sbFetch("/orders?placed_at=gt.0", {
+          method: "DELETE",
+          headers: sbHeaders({ Prefer: "return=minimal" })
+        }).then(() => cloudRefresh());
+      } else {
+        saveOrdersLS();
+      }
     },
 
     getUnavailable() {
-      return read(AVAIL_KEY) || [];
+      return unavailable.slice();
     },
 
     isUnavailable(id) {
-      return this.getUnavailable().includes(id);
+      return unavailable.includes(id);
     },
 
     toggleUnavailable(id) {
-      const set = new Set(this.getUnavailable());
-      if (set.has(id)) set.delete(id);
-      else set.add(id);
-      localStorage.setItem(AVAIL_KEY, JSON.stringify([...set]));
-      notify();
+      const has = unavailable.includes(id);
+      unavailable = has ? unavailable.filter((x) => x !== id) : unavailable.concat(id);
+      notifyLocal();
+      notifyOthers();
+      if (CLOUD) {
+        if (has) {
+          sbFetch("/unavailable_items?item_id=eq." + encodeURIComponent(id), {
+            method: "DELETE",
+            headers: sbHeaders({ Prefer: "return=minimal" })
+          }).then(() => cloudRefresh());
+        } else {
+          sbFetch("/unavailable_items", {
+            method: "POST",
+            headers: sbHeaders({ Prefer: "return=minimal" }),
+            body: JSON.stringify({ item_id: id })
+          }).then(() => cloudRefresh());
+        }
+      } else {
+        saveAvailLS();
+      }
     },
 
-    // Fires cb() whenever another tab changes orders/availability.
     onChange(cb) {
-      window.addEventListener("storage", (e) => {
-        if (e.key === ORDERS_KEY || e.key === AVAIL_KEY) cb();
-      });
-      if (channel) channel.onmessage = () => cb();
+      listeners.push(cb);
     }
   };
+
+  // ---------- init ----------
+  if (CLOUD) {
+    cloudRefresh();
+    setInterval(cloudRefresh, POLL_MS);
+  } else {
+    loadFromLS();
+  }
+
+  // Same-browser cross-tab updates (used in single-device mode).
+  window.addEventListener("storage", (e) => {
+    if (!CLOUD && (e.key === ORDERS_KEY || e.key === AVAIL_KEY)) {
+      loadFromLS();
+      notifyLocal();
+    }
+  });
+  if (channel) {
+    channel.onmessage = () => {
+      if (!CLOUD) loadFromLS();
+      notifyLocal();
+    };
+  }
+
+  return api;
 })();

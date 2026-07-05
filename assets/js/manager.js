@@ -130,6 +130,13 @@
     refresh();
   };
 
+  // Show whether cross-device cloud sync is on or we're single-device only.
+  const sync = document.getElementById("syncStatus");
+  if (sync) {
+    sync.textContent = Store.isCloud ? "● Live sync on" : "○ Single device";
+    sync.style.color = Store.isCloud ? "#6fe39a" : "rgba(247,241,227,0.65)";
+  }
+
   // Refresh on cross-tab changes and tick the "x ago" timers.
   Store.onChange(refresh);
   setInterval(renderOrders, 15000);
