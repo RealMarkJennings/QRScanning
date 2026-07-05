@@ -160,8 +160,10 @@
     toast(`Order ${rec.ref} placed! Track it above 🍤`);
   };
 
-  // ---- Live order tracking (this device) ----
+  // ---- Live order tracking + bill (this device) ----
   const MY_KEY = "vasco_my_orders_v1";
+  const BILL_KEY = "vasco_my_bills_v1";     // { [table]: billRef }
+  const DEVICE_KEY = "vasco_device_id_v1";
   const STEPS = ["Received", "Preparing", "Ready", "Served"];
   const FRIENDLY = {
     Received: "Order received",
@@ -170,58 +172,150 @@
     Served: "Served",
     Closed: "Completed"
   };
+
   let myOrders = [];
   try { myOrders = JSON.parse(localStorage.getItem(MY_KEY)) || []; } catch (e) { myOrders = []; }
+  let myBills = {};
+  try { myBills = JSON.parse(localStorage.getItem(BILL_KEY)) || {}; } catch (e) { myBills = {}; }
+  let deviceId = localStorage.getItem(DEVICE_KEY);
+  if (!deviceId) { deviceId = "d" + Math.random().toString(36).slice(2, 10); localStorage.setItem(DEVICE_KEY, deviceId); }
   const lastStatus = {};
+
+  const trackBar = document.getElementById("trackBar");
 
   function recordMyOrder(rec) {
     myOrders.push({ ref: rec.ref, table: rec.table, placedAt: rec.placedAt });
     localStorage.setItem(MY_KEY, JSON.stringify(myOrders));
   }
 
-  const trackBar = document.getElementById("trackBar");
+  // All rounds this device placed at this table (oldest first = Round 1..N).
+  function myRounds() {
+    const all = Store.getOrders();
+    return myOrders
+      .map((m) => all.find((o) => o.ref === m.ref))
+      .filter((o) => o && String(o.table) === String(table) && !o.ref.startsWith("BILL-"))
+      .sort((a, b) => a.placedAt - b.placedAt);
+  }
+
+  function currentBill() {
+    const ref = myBills[table];
+    if (!ref) return null;
+    return Store.getOrders().find((o) => o.ref === ref) || null;
+  }
+
+  function requestBill() {
+    const rounds = myRounds();
+    if (rounds.length === 0) return;
+    const agg = {};
+    let total = 0;
+    rounds.forEach((o) => {
+      o.items.forEach((it) => {
+        const key = it.name + "|" + it.price;
+        agg[key] = agg[key] || { name: it.name, price: it.price, qty: 0 };
+        agg[key].qty += it.qty;
+      });
+      total += o.total;
+    });
+    const bill = Store.addBill({
+      table,
+      items: Object.values(agg),
+      total,
+      refs: rounds.map((o) => o.ref),
+      device: deviceId
+    });
+    myBills[table] = bill.ref;
+    localStorage.setItem(BILL_KEY, JSON.stringify(myBills));
+    renderTracking();
+    trackBar.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast("Bill requested — a waiter is on the way 🧾");
+  }
+
+  function startFresh() {
+    myOrders = myOrders.filter((m) => String(m.table) !== String(table));
+    localStorage.setItem(MY_KEY, JSON.stringify(myOrders));
+    delete myBills[table];
+    localStorage.setItem(BILL_KEY, JSON.stringify(myBills));
+    renderTracking();
+  }
 
   function renderTracking() {
-    const all = Store.getOrders();
-    const mine = myOrders
-      .map((m) => all.find((o) => o.ref === m.ref))
-      .filter((o) => o && String(o.table) === String(table) && o.status !== "Closed")
-      .sort((a, b) => b.placedAt - a.placedAt);
+    const rounds = myRounds();
+    const bill = currentBill();
 
-    // Toast when a tracked order's status changes (e.g. becomes Ready).
-    mine.forEach((o) => {
+    // Toast when a round's status changes (e.g. becomes Ready).
+    rounds.forEach((o) => {
       if (lastStatus[o.ref] && lastStatus[o.ref] !== o.status) {
         toast(`${FRIENDLY[o.status] || o.status} — order ${o.ref}`);
       }
       lastStatus[o.ref] = o.status;
     });
 
-    if (mine.length === 0) {
+    if (rounds.length === 0) {
       trackBar.classList.remove("show");
       trackBar.innerHTML = "";
       return;
     }
+
+    const total = rounds.reduce((s, o) => s + o.total, 0);
     trackBar.classList.add("show");
-    trackBar.innerHTML = mine.map(trackCardHtml).join("");
+    trackBar.innerHTML =
+      summaryHtml(rounds.length, total, bill) +
+      rounds.map((o, i) => roundCardHtml(o, i + 1)).join("");
+
+    const reqBtn = document.getElementById("requestBillBtn");
+    if (reqBtn) reqBtn.onclick = requestBill;
+    const freshBtn = document.getElementById("startFreshBtn");
+    if (freshBtn) freshBtn.onclick = startFresh;
   }
 
-  function trackCardHtml(o) {
-    const idx = STEPS.indexOf(o.status);
-    const stepsHtml = STEPS.map((label, i) => {
-      const cls = i < idx ? "done" : i === idx ? "current" : "";
-      const mark = i < idx ? "✓" : i + 1;
-      return `<div class="step ${cls}"><span class="bar"></span><span class="dot">${mark}</span><span class="label">${label}</span></div>`;
-    }).join("");
+  function summaryHtml(n, total, bill) {
+    let action, extra = "";
+    if (!bill) {
+      action = `<button class="btn btn-gold btn-sm" id="requestBillBtn">Request bill</button>`;
+    } else if (bill.status === "Paid") {
+      action = `<span class="bill-flag paid">Paid ✓</span>`;
+      extra = `<div class="bill-done">
+                 <div>Thank you! Your table is settled.</div>
+                 <button class="btn btn-ghost btn-sm" id="startFreshBtn" style="margin-top:10px;">Start a new tab</button>
+               </div>`;
+    } else {
+      action = `<span class="bill-flag pending">🧾 Bill requested</span>`;
+      extra = `<div class="bill-pending-note">A waiter is on the way with your bill — total <strong>R${fmt(bill.total)}</strong>.</div>`;
+    }
     return `
-      <div class="track-card">
+      <div class="track-card track-summary">
         <div class="track-head">
           <div>
-            <div class="track-title">Your order</div>
-            <div class="track-ref">${o.ref} · Table ${o.table} · ${o.items.reduce((n, it) => n + it.qty, 0)} item(s) · R${fmt(o.total)}</div>
+            <div class="track-title">Your table · Table ${table}</div>
+            <div class="track-ref">${n} round${n > 1 ? "s" : ""} · Running total <strong>R${fmt(total)}</strong></div>
+          </div>
+          <div>${action}</div>
+        </div>
+        ${extra}
+      </div>`;
+  }
+
+  function roundCardHtml(o, num) {
+    const idx = STEPS.indexOf(o.status);
+    const closed = o.status === "Closed";
+    const stepsHtml = closed
+      ? ""
+      : `<div class="steps">${STEPS.map((label, i) => {
+          const cls = i < idx ? "done" : i === idx ? "current" : "";
+          const mark = i < idx ? "✓" : i + 1;
+          return `<div class="step ${cls}"><span class="bar"></span><span class="dot">${mark}</span><span class="label">${label}</span></div>`;
+        }).join("")}</div>`;
+    const count = o.items.reduce((n, it) => n + it.qty, 0);
+    return `
+      <div class="track-card track-round ${closed ? "is-closed" : ""}">
+        <div class="track-head">
+          <div>
+            <div class="track-title">Round ${num}</div>
+            <div class="track-ref">${o.ref} · ${count} item(s) · R${fmt(o.total)}</div>
           </div>
           <span class="status-chip s-${o.status}">${FRIENDLY[o.status] || o.status}</span>
         </div>
-        <div class="steps">${stepsHtml}</div>
+        ${stepsHtml}
       </div>`;
   }
 

@@ -374,6 +374,33 @@ a { color: inherit; }
   50% { box-shadow: 0 0 0 7px rgba(244,193,61,0.12); }
 }
 
+/* customer: table summary + bill */
+.track-summary { background: linear-gradient(180deg, #13294d, var(--navy)); border-color: var(--gold); }
+.track-summary .track-title { font-size: 1.15rem; }
+.track-round.is-closed { opacity: 0.72; }
+.bill-flag { font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+.bill-flag.pending { background: var(--gold); color: var(--navy); }
+.bill-flag.paid { background: var(--green); color: #fff; }
+.bill-pending-note { margin-top: 12px; font-size: 0.86rem; color: var(--cream); border-top: 1px solid rgba(247,241,227,0.15); padding-top: 12px; }
+.bill-pending-note strong, .track-ref strong { color: var(--gold-2); }
+.bill-done { margin-top: 12px; font-size: 0.9rem; color: var(--cream); border-top: 1px solid rgba(247,241,227,0.15); padding-top: 12px; }
+.bill-done .btn-ghost { color: var(--cream); border-color: rgba(247,241,227,0.4); }
+
+/* manager: bill-to-settle cards */
+#billsAlerts { display: grid; gap: 14px; margin-bottom: 18px; }
+.bill-card {
+  background: #fff; border: 1px solid var(--gold); border-left: 6px solid var(--gold);
+  border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+  animation: billpop 0.25s ease;
+}
+@keyframes billpop { from { transform: scale(0.99); opacity: 0.6; } to { transform: scale(1); opacity: 1; } }
+.bill-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 8px; }
+.bill-badge { background: var(--gold); color: var(--navy); font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; padding: 4px 10px; border-radius: 999px; margin-right: 10px; }
+.bill-table { font-family: Georgia, serif; font-size: 1.2rem; font-weight: 700; }
+.bill-grand { font-family: Georgia, serif; font-size: 1.5rem; font-weight: 700; color: var(--navy); }
+.bill-card-foot { padding: 10px 16px 14px; border-top: 1px solid var(--line); background: var(--cream); }
+.bill-card-foot .btn { width: 100%; }
+
 @media (max-width: 560px) {
   .brand-sub { display: none; }
   .hero h1 { font-size: 1.6rem; }
