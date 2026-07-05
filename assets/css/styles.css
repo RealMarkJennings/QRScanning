@@ -386,6 +386,14 @@ a { color: inherit; }
 .bill-done { margin-top: 12px; font-size: 0.9rem; color: var(--cream); border-top: 1px solid rgba(247,241,227,0.15); padding-top: 12px; }
 .bill-done .btn-ghost { color: var(--cream); border-color: rgba(247,241,227,0.4); }
 
+/* customer: bill drawer (view before requesting) */
+.bill-view-head { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px; }
+.bill-lines { list-style: none; margin: 0 0 12px; padding: 0; }
+.bill-lines li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 0.95rem; }
+.bill-total-row { display: flex; justify-content: space-between; font-size: 1.25rem; font-weight: 700; color: var(--navy); padding-top: 8px; }
+.bill-paid-line { text-align: center; font-weight: 700; color: var(--green); font-size: 1.05rem; }
+.bill-pending-line { text-align: center; font-weight: 600; color: var(--navy); font-size: 0.9rem; }
+
 /* manager: bill-to-settle cards */
 #billsAlerts { display: grid; gap: 14px; margin-bottom: 18px; }
 .bill-card {

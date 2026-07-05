@@ -34,12 +34,21 @@
   const grid = document.getElementById("ordersGrid");
   const empty = document.getElementById("ordersEmpty");
 
+  // A short label for whose order/bill this is (a bill is per phone/user).
+  function guestLabel(o) {
+    if (o.guest) return o.guest;
+    if (o.device) return "Guest-" + o.device.slice(-2).toUpperCase();
+    return "Guest";
+  }
+
   function markPaid(b) {
-    let refs = [];
-    try {
-      const meta = JSON.parse(b.note);
-      if (meta && Array.isArray(meta.refs)) refs = meta.refs;
-    } catch (e) { /* no covered refs */ }
+    let refs = Array.isArray(b.refs) ? b.refs : [];
+    if (!refs.length) {
+      try {
+        const meta = JSON.parse(b.note);
+        if (meta && Array.isArray(meta.refs)) refs = meta.refs;
+      } catch (e) { /* no covered refs */ }
+    }
     refs.forEach((r) => Store.setStatus(r, "Closed"));
     Store.setStatus(b.ref, "Paid");
     refresh();
@@ -59,13 +68,16 @@
         card.className = "bill-card";
         card.innerHTML = `
           <div class="bill-card-head">
-            <div><span class="bill-badge">🧾 Bill requested</span><span class="bill-table">Table ${b.table}</span></div>
+            <div>
+              <span class="bill-badge">🧾 Bill requested</span>
+              <span class="bill-table">${guestLabel(b)} · Table ${b.table}</span>
+            </div>
             <div class="bill-grand">R${fmt(b.total)}</div>
           </div>
           <ul class="order-items">${itemsHtml}</ul>
           <div class="order-time">${timeAgo(b.placedAt)}</div>
           <div class="bill-card-foot">
-            <button class="btn btn-gold btn-sm">Mark paid &amp; close table</button>
+            <button class="btn btn-gold btn-sm">Mark paid</button>
           </div>`;
         card.querySelector("button").onclick = () => markPaid(b);
         mount.appendChild(card);
@@ -102,7 +114,7 @@
         <div class="order-top">
           <div>
             <div class="order-table">Table ${o.table}</div>
-            <div class="order-ref">${o.ref}</div>
+            <div class="order-ref">${o.ref} · ${guestLabel(o)}</div>
           </div>
           <span class="status-chip s-${o.status}">${o.status}</span>
         </div>

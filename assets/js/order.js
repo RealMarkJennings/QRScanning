@@ -124,11 +124,15 @@
     });
   }
 
+  const billDrawer = document.getElementById("billDrawer");
   function openDrawer() { drawer.classList.add("show"); backdrop.classList.add("show"); }
   function closeDrawer() { drawer.classList.remove("show"); backdrop.classList.remove("show"); }
+  function closeBill() { billDrawer.classList.remove("show"); backdrop.classList.remove("show"); }
+  function closeAllDrawers() { closeDrawer(); closeBill(); }
   document.getElementById("openCart").onclick = openDrawer;
   document.getElementById("closeCart").onclick = closeDrawer;
-  backdrop.onclick = closeDrawer;
+  document.getElementById("closeBill").onclick = closeBill;
+  backdrop.onclick = closeAllDrawers;
 
   // ---- Place order ----
   function toast(msg) {
@@ -143,11 +147,15 @@
     if (count === 0) return;
     const items = [];
     cart.forEach((e) => items.push({ name: e.item.name, price: e.item.price, qty: e.qty }));
+    const guest = document.getElementById("guestName").value.trim();
+    localStorage.setItem(NAME_KEY, guest);
     const rec = Store.addOrder({
       table,
       items,
       total,
-      note: document.getElementById("orderNote").value.trim()
+      note: document.getElementById("orderNote").value.trim(),
+      guest,
+      device: deviceId
     });
     cart.clear();
     document.getElementById("orderNote").value = "";
@@ -164,6 +172,7 @@
   const MY_KEY = "vasco_my_orders_v1";
   const BILL_KEY = "vasco_my_bills_v1";     // { [table]: billRef }
   const DEVICE_KEY = "vasco_device_id_v1";
+  const NAME_KEY = "vasco_guest_name_v1";
   const STEPS = ["Received", "Preparing", "Ready", "Served"];
   const FRIENDLY = {
     Received: "Order received",
@@ -182,6 +191,10 @@
   const lastStatus = {};
 
   const trackBar = document.getElementById("trackBar");
+
+  // Prefill the saved name so the guest only types it once.
+  document.getElementById("guestName").value = localStorage.getItem(NAME_KEY) || "";
+  function guestName() { return localStorage.getItem(NAME_KEY) || ""; }
 
   function recordMyOrder(rec) {
     myOrders.push({ ref: rec.ref, table: rec.table, placedAt: rec.placedAt });
@@ -203,9 +216,8 @@
     return Store.getOrders().find((o) => o.ref === ref) || null;
   }
 
-  function requestBill() {
-    const rounds = myRounds();
-    if (rounds.length === 0) return;
+  // Combine all rounds into one itemised bill.
+  function aggregate(rounds) {
     const agg = {};
     let total = 0;
     rounds.forEach((o) => {
@@ -216,17 +228,60 @@
       });
       total += o.total;
     });
+    return { items: Object.values(agg), total };
+  }
+
+  // Open the bill view (see the full itemised bill before requesting it).
+  function openBill() {
+    const rounds = myRounds();
+    if (rounds.length === 0) return;
+    const { items, total } = aggregate(rounds);
+    const bill = currentBill();
+    const guest = guestName();
+
+    document.getElementById("billDrawerTitle").textContent = guest ? guest + "'s bill" : "Your bill";
+    document.getElementById("billItems").innerHTML = `
+      <div class="bill-view-head">Table ${table}${guest ? " · " + guest : ""} · ${rounds.length} round${rounds.length > 1 ? "s" : ""}</div>
+      <ul class="bill-lines">
+        ${items.map((it) => `<li><span>${it.qty}× ${it.name}</span><span>R${fmt(it.qty * it.price)}</span></li>`).join("")}
+      </ul>
+      <div class="bill-total-row"><span>Total</span><span>R${fmt(total)}</span></div>`;
+
+    const foot = document.getElementById("billFoot");
+    if (!bill) {
+      foot.innerHTML = `
+        <button class="btn btn-gold" style="width:100%;" id="confirmBill">Request bill</button>
+        <p class="muted center" style="font-size:0.72rem;margin:8px 0 0;">A waiter will bring your bill. Demo — no real payment is taken.</p>`;
+      foot.querySelector("#confirmBill").onclick = requestBill;
+    } else if (bill.status === "Paid") {
+      foot.innerHTML = `
+        <div class="bill-paid-line">Paid ✓ Thank you!</div>
+        <button class="btn btn-ghost" style="width:100%;margin-top:10px;" id="freshFromBill">Start a new tab</button>`;
+      foot.querySelector("#freshFromBill").onclick = () => { startFresh(); closeBill(); };
+    } else {
+      foot.innerHTML = `<div class="bill-pending-line">🧾 Bill requested — a waiter is on the way with your bill.</div>`;
+    }
+
+    billDrawer.classList.add("show");
+    backdrop.classList.add("show");
+  }
+
+  function requestBill() {
+    const rounds = myRounds();
+    if (rounds.length === 0) return;
+    const { items, total } = aggregate(rounds);
     const bill = Store.addBill({
       table,
-      items: Object.values(agg),
+      items,
       total,
       refs: rounds.map((o) => o.ref),
+      guest: guestName(),
       device: deviceId
     });
     myBills[table] = bill.ref;
     localStorage.setItem(BILL_KEY, JSON.stringify(myBills));
     renderTracking();
-    trackBar.scrollIntoView({ behavior: "smooth", block: "start" });
+    openBill(); // refresh the drawer to the "requested" state
     toast("Bill requested — a waiter is on the way 🧾");
   }
 
@@ -262,36 +317,29 @@
       summaryHtml(rounds.length, total, bill) +
       rounds.map((o, i) => roundCardHtml(o, i + 1)).join("");
 
-    const reqBtn = document.getElementById("requestBillBtn");
-    if (reqBtn) reqBtn.onclick = requestBill;
-    const freshBtn = document.getElementById("startFreshBtn");
-    if (freshBtn) freshBtn.onclick = startFresh;
+    const viewBtn = document.getElementById("viewBillBtn");
+    if (viewBtn) viewBtn.onclick = openBill;
   }
 
   function summaryHtml(n, total, bill) {
-    let action, extra = "";
-    if (!bill) {
-      action = `<button class="btn btn-gold btn-sm" id="requestBillBtn">Request bill</button>`;
-    } else if (bill.status === "Paid") {
-      action = `<span class="bill-flag paid">Paid ✓</span>`;
-      extra = `<div class="bill-done">
-                 <div>Thank you! Your table is settled.</div>
-                 <button class="btn btn-ghost btn-sm" id="startFreshBtn" style="margin-top:10px;">Start a new tab</button>
-               </div>`;
-    } else {
-      action = `<span class="bill-flag pending">🧾 Bill requested</span>`;
-      extra = `<div class="bill-pending-note">A waiter is on the way with your bill — total <strong>R${fmt(bill.total)}</strong>.</div>`;
-    }
+    let flag = "";
+    let btnLabel = "View bill";
+    if (bill && bill.status === "Paid") { flag = `<span class="bill-flag paid">Paid ✓</span>`; btnLabel = "View receipt"; }
+    else if (bill) { flag = `<span class="bill-flag pending">🧾 Bill requested</span>`; }
+    const guest = guestName();
+    const who = guest ? `${guest}'s tab` : "Your tab";
     return `
       <div class="track-card track-summary">
         <div class="track-head">
           <div>
-            <div class="track-title">Your table · Table ${table}</div>
+            <div class="track-title">${who} · Table ${table}</div>
             <div class="track-ref">${n} round${n > 1 ? "s" : ""} · Running total <strong>R${fmt(total)}</strong></div>
           </div>
-          <div>${action}</div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+            ${flag}
+            <button class="btn btn-gold btn-sm" id="viewBillBtn">${btnLabel}</button>
+          </div>
         </div>
-        ${extra}
       </div>`;
   }
 
