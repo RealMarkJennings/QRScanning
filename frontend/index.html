@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vasco da Gama Taverna — Table Ordering</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23e6a817'/%3E%3Ctext x='16' y='23' font-size='18' text-anchor='middle'%3E%E2%9A%93%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="assets/css/styles.css?v=5" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="index.html">
+        <span class="crest">⚓</span>
+        <span>
+          <span class="brand-name">Vasco da Gama Taverna</span>
+          <span class="brand-sub">The Portuguese Embassy · Since 1972</span>
+        </span>
+      </a>
+      <div class="topbar-meta">
+        <a class="btn btn-gold btn-sm" href="manager.html">Manager Dashboard →</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Scan · Order · Pay from your table</h1>
+    <p>QR TABLE ORDERING — PROTOTYPE</p>
+  </section>
+
+  <main class="wrap">
+    <div class="card" style="margin-bottom:26px;">
+      <div class="card-body">
+        <h3>How this demo works</h3>
+        <p class="muted" style="margin-bottom:10px;">
+          Each table has a printed QR code. A guest scans it, the menu opens on their
+          phone already tagged to that table, they order, and the order appears live on
+          the <a href="manager.html"><strong>Manager Dashboard</strong></a> — no waiter, no waiting.
+          This build has no backend or real payments; orders are stored in your browser so
+          you can try the whole flow end to end.
+        </p>
+        <p class="muted" style="margin:0;">
+          <strong>Try it:</strong> tap a table below (or scan its QR with your phone) to open the
+          menu and place an order, then open the Manager Dashboard to watch it come through.
+          For the QR to work on a phone, host these files (e.g. GitHub Pages) and scan from there.
+        </p>
+      </div>
+    </div>
+
+    <h2 class="cat-title">Table QR codes</h2>
+    <p class="cat-note">Print one per table. Each links straight to that table's menu.</p>
+    <div class="cards" id="tableCards"></div>
+
+    <p class="footer-note">
+      Demo styled after vascos.co.za · Menu from Vasco Menu 2024 · Not affiliated — prototype only.
+    </p>
+  </main>
+
+  <script src="assets/js/qrcode.min.js?v=5"></script>
+  <script>
+    // Build the absolute URL to order.html so scanned QRs resolve correctly.
+    const base = location.href.replace(/index\.html.*$/, "").replace(/\/$/, "");
+    const orderUrl = (t) => `${base}/order.html?table=${t}`;
+    const TABLES = [1, 2, 3, 4, 5, 6];
+
+    const grid = document.getElementById("tableCards");
+    TABLES.forEach((t) => {
+      const card = document.createElement("div");
+      card.className = "card qr-card";
+      card.innerHTML = `
+        <div class="qr-box" id="qr-${t}"></div>
+        <div class="card-body">
+          <div class="tnum">Table ${t}</div>
+          <a class="btn btn-gold btn-sm" style="margin-top:8px;width:100%;" href="${orderUrl(t)}">Open menu →</a>
+        </div>`;
+      grid.appendChild(card);
+      new QRCode(card.querySelector(`#qr-${t}`), {
+        text: orderUrl(t),
+        width: 168,
+        height: 168,
+        colorDark: "#0c1f3f",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    });
+  </script>
+</body>
+</html>
