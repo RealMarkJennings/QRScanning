@@ -119,7 +119,7 @@
           <span class="status-chip s-${o.status}">${o.status}</span>
         </div>
         <ul class="order-items">${itemsHtml}</ul>
-        ${o.note ? `<div class="order-note">“${o.note}”</div>` : ""}
+        ${o.note && !o.note.trim().startsWith("{") ? `<div class="order-note">“${o.note}”</div>` : ""}
         <div class="order-time">${timeAgo(o.placedAt)}</div>
         <div class="order-foot">
           <span class="order-total">R${fmt(o.total)}</span>
